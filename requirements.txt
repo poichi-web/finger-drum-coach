@@ -1,0 +1,7 @@
+mido==1.3.3
+python-rtmidi==1.5.8
+pygame==2.6.1
+
+# NOTE: python-rtmidi requires a pre-built wheel (no C++ compiler needed).
+# Use Python 3.12 (py -3.12). Python 3.14 has no wheel and build will fail.
+
