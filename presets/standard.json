@@ -1,0 +1,25 @@
+{
+  "name": "standard",
+  "note_map": {
+    "51": 36,
+    "53": 38,
+    "37": 42,
+    "57": 46,
+    "39": 45,
+    "41": 47,
+    "45": 50,
+    "48": 49,
+    "42": 51,
+    "38": 37,
+    "46": 44,
+    "36": 57,
+    "49": 54
+  },
+  "_comment": {
+    "layout": "底辺 4 パッドを Kick/Snare/ClosedHH/OpenHH に配置 (8ビート標準)",
+    "bottom_row": "Pad1(51→36 Kick) Pad2(53→38 Snare) Pad3(37→42 ClHH) Pad4(57→46 OpHH)",
+    "row2":       "Pad5(39→45 LowTom) Pad6(41→47 MidTom) Pad7(45→50 HiTom) Pad8(48→49 Crash)",
+    "row3":       "Pad9/10(42→51 Ride) Pad11/15(38→37 SideStick) Pad12(46→44 PedalHH)",
+    "top_row":    "Pad13/14(36→57 Crash2) Pad16(49→54 Tambourine)"
+  }
+}

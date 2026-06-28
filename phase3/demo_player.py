@@ -4,6 +4,7 @@ Phase 3: デモプレイヤー + リアルタイム MIDI モニター
 - パッドを叩くと FluidSynth + GM サウンドフォントで即発音
 - デモパターンを再生しながら 4×4 パッドグリッドで点灯表示
 - pygame は表示専用（mixer 不使用）
+- --remap PRESET でパッドリマップを適用（Phase 5 機能）
 
 操作:
   Space       : デモ 開始 / 停止
@@ -13,6 +14,7 @@ Phase 3: デモプレイヤー + リアルタイム MIDI モニター
   Q / Esc     : 終了
 
 実行: .\\venv\\Scripts\\python.exe phase3/demo_player.py
+      .\\venv\\Scripts\\python.exe phase3/demo_player.py --remap standard
 """
 import sys
 import os
@@ -20,6 +22,7 @@ import json
 import time
 import threading
 import queue
+import argparse
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -33,6 +36,14 @@ except ImportError as e:
 
 sys.path.insert(0, str(Path(__file__).parent))
 from sounds import DrumSynth
+
+_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_ROOT))
+try:
+    from phase5.remap import Remap
+    _REMAP_AVAILABLE = True
+except ImportError:
+    _REMAP_AVAILABLE = False
 
 # ── 定数 ────────────────────────────────────────────────────
 WIN_W, WIN_H = 720, 500
@@ -95,6 +106,7 @@ PATTERNS = {
 PAD_MAP_PATH = Path(__file__).parent.parent / "pad_map.json"
 
 def load_note_to_pad() -> dict:
+    """original_note → pad_index (0-15)"""
     if not PAD_MAP_PATH.exists():
         return {}
     data = json.loads(PAD_MAP_PATH.read_text(encoding="utf-8"))
@@ -103,6 +115,27 @@ def load_note_to_pad() -> dict:
         note = info["note"]
         if note not in result:
             result[note] = int(idx_str)
+    return result
+
+
+def build_demo_note_to_pad(note_to_pad: dict, remap: "Remap | None") -> dict:
+    """
+    デモが鳴らす note → 点灯すべき pad_index を返す。
+    remap が有効な場合は「そのサウンドを割り当てられたパッド」を逆引きして点灯する。
+    """
+    if remap is None:
+        return note_to_pad
+    nm = remap.note_map()
+    result = {}
+    # remapped note (target) → 物理パッド (original の pad_index)
+    for original, target in nm.items():
+        pad_idx = note_to_pad.get(original)
+        if pad_idx is not None and target not in result:
+            result[target] = pad_idx
+    # remap されていないノートは元のマッピングを使用
+    for original, pad_idx in note_to_pad.items():
+        if original not in nm:
+            result.setdefault(original, pad_idx)
     return result
 
 # ── シーケンサースレッド ─────────────────────────────────────
@@ -215,6 +248,23 @@ def draw_pad_grid(screen, font, pad_flash, pad_user_flash, now):
 
 # ── メイン ────────────────────────────────────────────────────
 def main():
+    parser = argparse.ArgumentParser(description="Finger Drum Coach — Demo Player")
+    parser.add_argument("--remap", "-r", metavar="PRESET",
+                        help="パッドリマッププリセット名 (presets/<NAME>.json)")
+    args = parser.parse_args()
+
+    # リマップ読み込み
+    remap = None
+    if args.remap and _REMAP_AVAILABLE:
+        remap_path = _ROOT / "presets" / f"{args.remap}.json"
+        if remap_path.exists():
+            remap = Remap.from_file(remap_path)
+            print(f"[Remap] プリセット '{remap.name}' を適用します。")
+        else:
+            print(f"[WARN] リマッププリセットが見つかりません: {remap_path}")
+    elif args.remap and not _REMAP_AVAILABLE:
+        print("[WARN] phase5/remap.py が見つかりません。リマップ機能は無効です。")
+
     # FluidSynth 音源を初期化（表示より先）
     synth = DrumSynth()
 
@@ -233,6 +283,7 @@ def main():
     font_pad = pygame.font.SysFont("arialblack,arial", 20, bold=True)
 
     note_to_pad = load_note_to_pad()
+    demo_note_to_pad = build_demo_note_to_pad(note_to_pad, remap)
 
     seq_q = queue.Queue()
     midi_q = queue.Queue()
@@ -289,18 +340,19 @@ def main():
                 for note, seq_steps in pattern["tracks"].items():
                     if step < len(seq_steps) and seq_steps[step]:
                         synth.hit(note, 90)
-                        pad_idx = note_to_pad.get(note)
+                        pad_idx = demo_note_to_pad.get(note)
                         if pad_idx is not None:
                             pad_flash[pad_idx] = now + FLASH_DUR
         except queue.Empty:
             pass
 
-        # MIDI 入力
+        # MIDI 入力（リマップ適用）
         try:
             while True:
                 _, note, vel = midi_q.get_nowait()
-                synth.hit(note, vel)
-                pad_idx = note_to_pad.get(note)
+                play_note = remap.apply(note) if remap else note
+                synth.hit(play_note, vel)
+                pad_idx = note_to_pad.get(note)  # 物理パッド位置を表示
                 if pad_idx is not None:
                     pad_user_flash[pad_idx] = now + FLASH_DUR
         except queue.Empty:
@@ -313,6 +365,10 @@ def main():
         screen.blit(p_name, (WIN_W//2 - p_name.get_width()//2, 18))
         p_desc = font_sm.render(pattern["desc"], True, TEXT_G)
         screen.blit(p_desc, (WIN_W//2 - p_desc.get_width()//2, 76))
+
+        if remap:
+            r_surf = font_sm.render(f"Remap: {remap.name}", True, (120, 200, 120))
+            screen.blit(r_surf, (WIN_W - r_surf.get_width() - 16, 8))
 
         bpm_surf = font_md.render(f"♩ = {bpm}", True, TEXT_W)
         screen.blit(bpm_surf, (WIN_W//2 - bpm_surf.get_width()//2, 110))
